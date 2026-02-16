@@ -6732,6 +6732,13 @@ void RelionJob::initialiseTomoReconstructTomogramsJob()
     joboptions["centre_proj"] = JobOption("Central Z-slice (in binned pix): ", 0., -50, 50, 10, "This defines the central Z-slice of all Z-slices that will be summed to generate the 2D projection (in pixels in the tomogram). Zero means the middle (centre) of the tomogram.");
     joboptions["thickness_proj"] = JobOption("Number of Z-slices (in binned pix): ", 10., 1, 30, 1, "This defines how many Z-slices will be summed to generate the 2D projection (in pixels in the tomogram). Half of the slices will be above and half will be below the central slice defined above.");
 
+    // CryoLithe reconstruction options
+    joboptions["do_cryolithe"] = JobOption("Use CryoLithe reconstruction?", false, "Set to Yes to use CryoLithe neural network reconstruction instead of the standard RELION reconstruction. CryoLithe requires a trained model and a conda environment.");
+    joboptions["fn_cryolithe_script"] = JobOption("CryoLithe script (super-list.py):", std::string("/home/amin/Documents/relion/CryoLithe/super-list.py"), "*", ".", "Absolute path to the CryoLithe super-list.py script.");
+    joboptions["fn_cryolithe_model"] = JobOption("CryoLithe model directory:", std::string(""), "*", ".", "Path to the directory containing the trained CryoLithe model (e.g., trained_models/cryolithe_21/).");
+    joboptions["cryolithe_conda_env"] = JobOption("Conda environment name:", std::string("CryoLithe"), "Name of the conda environment in which CryoLithe and its dependencies are installed.");
+    joboptions["cryolithe_batch_size"] = JobOption("CryoLithe batch size: ", 100000, 10000, 500000, 10000, "Batch size for CryoLithe reconstruction. Decrease if GPU runs out of memory.");
+    joboptions["gpu_ids_cryolithe"] = JobOption("Which GPUs to use:", std::string("0"), "Provide GPU device IDs, e.g. '0' for single GPU or '0 1 2 3' for multi-GPU. Multiple GPUs are separated by spaces.");
 
 }
 
@@ -6742,78 +6749,112 @@ bool RelionJob::getCommandsTomoReconstructTomogramsJob(std::string &outputname, 
 	initialisePipeline(outputname, job_counter);
 	std::string command;
 
-	if (joboptions["nr_mpi"].getNumber(error_message) > 1)
-		command="`which relion_tomo_reconstruct_tomogram_mpi`";
-	else
-		command="`which relion_tomo_reconstruct_tomogram`";
-	if (error_message != "") return false;
-
 	if (joboptions["in_tiltseries"].getString() == "")
 	{
 		error_message = "ERROR: you need to provide an input STAR file";
 		return false;
 	}
 
-	command += " --t " + joboptions["in_tiltseries"].getString();
-
 	Node node(joboptions["in_tiltseries"].getString(), joboptions["in_tiltseries"].node_type);
 	inputNodes.push_back(node);
 
-	command += " --o " + outputname;
-	if (joboptions["tomo_name"].getString().length() > 0)
-		command += " --tn " + joboptions["tomo_name"].getString();
-
-	if (joboptions["generate_split_tomograms"].getBoolean())
+	if (joboptions["do_cryolithe"].getBoolean())
 	{
+		// ---------- CryoLithe reconstruction ----------
+		if (joboptions["fn_cryolithe_model"].getString() == "")
+		{
+			error_message = "ERROR: you need to provide the path to the CryoLithe model directory.";
+			return false;
+		}
+		if (joboptions["fn_cryolithe_script"].getString() == "")
+		{
+			error_message = "ERROR: you need to provide the path to the CryoLithe super-list.py script.";
+			return false;
+		}
+
+		std::string conda_env = joboptions["cryolithe_conda_env"].getString();
+
+		command = "`which relion_python_tomo_cryolithe` " + conda_env;
+
+		command += " --tiltseries_star " + joboptions["in_tiltseries"].getString();
+		command += " --output_dir " + outputname;
+		command += " --model_dir " + joboptions["fn_cryolithe_model"].getString();
+		command += " --cryolithe_script " + joboptions["fn_cryolithe_script"].getString();
+		command += " --output_angpix " + joboptions["binned_angpix"].getString();
+		command += " --x_size " + joboptions["xdim"].getString();
+		command += " --y_size " + joboptions["ydim"].getString();
+		command += " --z_size " + joboptions["zdim"].getString();
+		command += " --batch_size " + joboptions["cryolithe_batch_size"].getString();
+		command += " --gpu \"" + joboptions["gpu_ids_cryolithe"].getString() + "\"";
+		command += " --num_workers " + joboptions["nr_threads"].getString();
+	}
+	else
+	{
+		// ---------- Standard RELION reconstruction ----------
+		if (joboptions["nr_mpi"].getNumber(error_message) > 1)
+			command="`which relion_tomo_reconstruct_tomogram_mpi`";
+		else
+			command="`which relion_tomo_reconstruct_tomogram`";
+		if (error_message != "") return false;
+
+		command += " --t " + joboptions["in_tiltseries"].getString();
+
+		command += " --o " + outputname;
+		if (joboptions["tomo_name"].getString().length() > 0)
+			command += " --tn " + joboptions["tomo_name"].getString();
+
+		if (joboptions["generate_split_tomograms"].getBoolean())
+		{
+			if (joboptions["do_fourier"].getBoolean())
+			{
+				error_message = "ERROR: you cannot generate tomograms for denoising with the Fourier-inversion from odd/even frames method! Disable at least one of them.";
+				return false;
+			}
+			command += " --generate_split_tomograms ";
+		}
+
+		command += " --w " + joboptions["xdim"].getString();
+		command += " --h " + joboptions["ydim"].getString();
+		command += " --d " + joboptions["zdim"].getString();
+
+		command += " --binned_angpix " + joboptions["binned_angpix"].getString();
+
 		if (joboptions["do_fourier"].getBoolean())
-        {
-            error_message = "ERROR: you cannot generate tomograms for denoising with the Fourier-inversion from odd/even frames method! Disable at least one of them.";
-            return false;
-        }
+		{
+			command += " --fourier ";
+			if (joboptions["ctf_intact_first_peak"].getBoolean())
+			{
+				command += " --ctf_intact_first_peak ";
+			}
+		}
 
-        command += " --generate_split_tomograms ";
+		if (joboptions["do_proj"].getBoolean())
+		{
+			command += " --do_proj ";
+			command += " --centre_proj " + joboptions["centre_proj"].getString();
+			command += " --thickness_proj " + joboptions["thickness_proj"].getString();
+		}
+
+		if (fabs(joboptions["tiltangle_offset"].getNumber(error_message)) > 0.)
+		{
+			command += " --tiltangle_offset " + joboptions["tiltangle_offset"].getString();
+		}
+		if (error_message != "") return false;
+
+		if (is_continue)
+		{
+			command += " --only_do_unfinished ";
+		}
+
+		// Running stuff
+		command += " --j " + joboptions["nr_threads"].getString();
 	}
 
-	command += " --w " + joboptions["xdim"].getString();
-	command += " --h " + joboptions["ydim"].getString();
-	command += " --d " + joboptions["zdim"].getString();
-
-	command += " --binned_angpix " + joboptions["binned_angpix"].getString();
-
-    if (joboptions["do_fourier"].getBoolean())
-    {
-        command += " --fourier ";
-        if (joboptions["ctf_intact_first_peak"].getBoolean())
-        {
-            command += " --ctf_intact_first_peak ";
-        }
-    }
-
-        if (joboptions["do_proj"].getBoolean())
-	{
-		command += " --do_proj ";
-        command += " --centre_proj " + joboptions["centre_proj"].getString();
-        command += " --thickness_proj " + joboptions["thickness_proj"].getString();
-	}
-
-    if (fabs(joboptions["tiltangle_offset"].getNumber(error_message)) > 0.)
-    {
-        command += " --tiltangle_offset " + joboptions["tiltangle_offset"].getString();
-    }
-    if (error_message != "") return false;
-
+	// Output node: same for both methods
 	Node node1(outputname+"tomograms.star", LABEL_RECONSTRUCT_TOMOGRAMS);
 	outputNodes.push_back(node1);
 
-	if (is_continue)
-	{
-		command += " --only_do_unfinished ";
-	}
-
-	// Running stuff
-	command += " --j " + joboptions["nr_threads"].getString();
-
-	// Other arguments for extraction
+	// Other arguments
 	command += " " + joboptions["other_args"].getString();
 	commands.push_back(command);
 

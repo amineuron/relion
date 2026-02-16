@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+
+print_error() {
+echo "
+---------------------------------- PYTHON ERROR ---------------------------------
+   CryoLithe requires a conda environment with the correct dependencies.
+   Make sure the conda environment name is correct and that CryoLithe
+   dependencies (torch, mrcfile, numpy, pyyaml) are installed in it.
+---------------------------------------------------------------------------------
+
+  Conda environment: $1
+"
+}
+
+# First argument is the conda environment name
+conda_env="$1"
+shift
+
+if [ -z "$conda_env" ]; then
+    echo "ERROR: No conda environment name provided."
+    exit 1
+fi
+
+# Try to activate conda via multiple methods
+CONDA_ACTIVATED=0
+
+# Method 1: conda shell.bash hook (works if conda is in PATH)
+if [ $CONDA_ACTIVATED -eq 0 ]; then
+    eval "$(conda shell.bash hook 2>/dev/null)" && CONDA_ACTIVATED=1
+fi
+
+# Method 2: source conda.sh from common locations
+if [ $CONDA_ACTIVATED -eq 0 ]; then
+    for conda_base in "$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" "/opt/conda"; do
+        if [ -f "${conda_base}/etc/profile.d/conda.sh" ]; then
+            source "${conda_base}/etc/profile.d/conda.sh"
+            CONDA_ACTIVATED=1
+            break
+        fi
+    done
+fi
+
+if [ $CONDA_ACTIVATED -eq 0 ]; then
+    echo "ERROR: conda not found. Please make sure conda is installed and in your PATH."
+    exit 1
+fi
+
+conda activate "$conda_env" 2>/dev/null
+if [ $? -ne 0 ]; then
+    print_error "$conda_env"
+    exit 1
+fi
+
+echo "Activated conda environment: $conda_env"
+echo "Python: $(which python)"
+
+# Find the Python wrapper script in the same directory as this wrapper
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_SCRIPT="${SCRIPT_DIR}/relion_run_cryolithe.py"
+
+if [ ! -f "$PYTHON_SCRIPT" ]; then
+    echo "ERROR: Cannot find relion_run_cryolithe.py at ${PYTHON_SCRIPT}"
+    exit 1
+fi
+
+# Run the Python wrapper with forwarded arguments
+python "$PYTHON_SCRIPT" "$@"
+exit_code=$?
+
+if [ $exit_code -ne 0 ]; then
+    echo ""
+    echo "CryoLithe wrapper exited with code: $exit_code"
+    exit $exit_code
+fi
+
+exit 0

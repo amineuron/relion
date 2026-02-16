@@ -2796,6 +2796,32 @@ void JobWindow::initialiseTomoReconstructTomogramsWindow()
 
     tab2->end();
 
+
+    tab3->begin();
+    tab3->label("CryoLithe");
+    resetHeight();
+
+    group3 = new Fl_Group(WCOL0,  MENUHEIGHT, 550, 600-MENUHEIGHT, "");
+    group3->end();
+    place("do_cryolithe", TOGGLE_DEACTIVATE, group3, false);
+    group3->begin();
+
+    current_y += STEPY/2;
+
+    place("fn_cryolithe_script", TOGGLE_DEACTIVATE);
+    place("fn_cryolithe_model", TOGGLE_DEACTIVATE);
+    place("cryolithe_conda_env", TOGGLE_DEACTIVATE);
+
+    current_y += STEPY/2;
+
+    place("cryolithe_batch_size", TOGGLE_DEACTIVATE);
+    place("gpu_ids_cryolithe", TOGGLE_DEACTIVATE);
+
+    group3->end();
+    guientries["do_cryolithe"].cb_menu_i();
+
+    tab3->end();
+
 }
 
 void JobWindow::initialiseTomoDenoiseTomogramsWindow()

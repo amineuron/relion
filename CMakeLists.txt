@@ -568,6 +568,7 @@ list(APPEND RELION_PYTHON_WRAPPERS
 	python_tomo_pick
 	python_tomo_get_particle_poses
 	python_tomo_denoise
+	python_tomo_cryolithe
 	filament_selection
 )
 
@@ -578,6 +579,13 @@ foreach (SCRIPT_FILE ${RELION_PYTHON_WRAPPERS})
             @ONLY
     )
 endforeach()
+
+# Copy standalone Python scripts to bin/
+configure_file(
+        ${CMAKE_SOURCE_DIR}/scripts/relion_run_cryolithe.py
+        ${CMAKE_BINARY_DIR}/bin/relion_run_cryolithe.py
+        COPYONLY
+)
 
 option(FETCH_WEIGHTS "Download model weights for dependent packages" ON)
 if (FETCH_WEIGHTS)
