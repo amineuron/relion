@@ -55,6 +55,7 @@
 #define DEFAULTQSUBLOCATION "/public/EM/RELION/relion/bin/relion_qsub.csh"
 #define DEFAULTCTFFINDLOCATION "/public/EM/ctffind/ctffind.exe"
 #define DEFAULTARETOMOLOCATION "/public/EM/AreTomo/AreTomo2/AreTomo2"
+#define DEFAULTARETOMO3LOCATION "/public/EM/AreTomo/AreTomo3/AreTomo3"
 #define DEFAULTBATCHTOMOLOCATION "/public/EM/imod/IMOD/bin/batchruntomo"
 //#define DEFAULTIMODWRAPPERLOCATION "relion_tomo_align_tilt_series"
 //#define DEFAULTDENOISINGWRAPPERLOCATION "relion_tomo_denoise"
@@ -404,7 +405,7 @@ static bool do_allow_change_minimum_dedicated;
 #define PROC_TOMO_RECONSTRUCT_TOMOGRAM 56 // Reconstruction of tomograms for particle picking
 #define PROC_TOMO_EXCLUDE_TILT_IMAGES 57 // Exclude bad tilt-images from tilt-series
 #define PROC_TOMO_DENOISE_TOMOGRAM 58 // Denoise tomograms
-#define PROC_TOMO_PICK_TOMOGRAM 59 // Denoise tomograms
+#define PROC_TOMO_PICK_TOMOGRAM 59 // Pick tomograms
 #define PROC_EXTERNAL       99// External scripts
 
 

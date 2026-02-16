@@ -6569,6 +6569,22 @@ void RelionJob::initialiseTomoAlignTiltSeriesJob()
     joboptions["other_aretomo_args"] = JobOption("Other AreTomo2 arguments", std::string(""), "Additional arguments that need to be passed to AreTomo2.");
 	joboptions["gpu_ids"] = JobOption("Which GPUs to use for AreTomo:", std::string(""), "Provide a list of which GPUs (e.g. 0:1:2:3) to use in AreTomo2. MPI-processes are separated by ':'. For example, to place one rank on device 0 and one rank on device 1, provide '0:1'.");
 
+    joboptions["do_aretomo3"] = JobOption("Use AreTomo3?", false, "Set to Yes to perform tilt series alignment using Shawn Zheng's AreTomo3.");
+
+    default_location = getenv ("RELION_ARETOMO3_EXECUTABLE");
+    char default_aretomo3[] = DEFAULTARETOMO3LOCATION;
+    if (default_location == NULL)
+    {
+        default_location = default_aretomo3;
+    }
+    joboptions["fn_aretomo3_exe"] = JobOption("AreTomo3 executable:", std::string(default_location), "*", ".", "Location of the AreTomo3 executable. You can control the default of this field by setting environment variable RELION_ARETOMO3_EXECUTABLE, or by editing the first few lines in src/pipeline_jobs.h and recompile the code.");
+
+    joboptions["do_aretomo3_tiltcorrect"] = JobOption("Correct Tilt Angle Offset?", false, "Specify Yes to correct the tilt angle offset in the tomogram (applies the AreTomo3 -TiltCor option). This is useful for correcting slanting in tomograms which can arise due to sample mounting or milling angle. This can be useful for in situ data.");
+    joboptions["aretomo3_tiltcorrect_angle"] = JobOption("Tilt Angle Offset:", 999 , -50, 50, 5, "The tilt angle (in degrees) to be offset. If set to a value larger than 180, AreTomo3 will search for the optimal value itself, otherwise the value specified here will be used.");
+    joboptions["do_aretomo3_auto_alignz"] = JobOption("Auto-estimate AlignZ?", false, "If set to Yes, AreTomo3 will automatically estimate the alignment thickness (AlignZ). If set to No, the estimated sample thickness from RELION will be used (same as AreTomo2).");
+    joboptions["other_aretomo3_args"] = JobOption("Other AreTomo3 arguments", std::string(""), "Additional arguments that need to be passed to AreTomo3.");
+	joboptions["gpu_ids_aretomo3"] = JobOption("Which GPUs to use for AreTomo3:", std::string(""), "Provide a list of which GPUs (e.g. 0:1:2:3) to use in AreTomo3. MPI-processes are separated by ':'. For example, to place one rank on device 0 and one rank on device 1, provide '0:1'.");
+
 }
 bool RelionJob::getCommandsTomoAlignTiltSeriesJob(std::string &outputname, std::vector<std::string> &commands,
                                        std::string &final_command, bool do_makedir, int job_counter, std::string &error_message)
@@ -6581,9 +6597,10 @@ bool RelionJob::getCommandsTomoAlignTiltSeriesJob(std::string &outputname, std::
 	if (joboptions["do_imod_fiducials"].getBoolean()) i++;
 	if (joboptions["do_imod_patchtrack"].getBoolean()) i++;
 	if (joboptions["do_aretomo2"].getBoolean()) i++;
+	if (joboptions["do_aretomo3"].getBoolean()) i++;
 	if (i != 1)
 	{
-		error_message = "ERROR: you should (only) select ONE of the alignment methods: IMOD:fiducials or IMOD:patchtracking or AreTomo.";
+		error_message = "ERROR: you should (only) select ONE of the alignment methods: IMOD:fiducials or IMOD:patchtracking or AreTomo2 or AreTomo3.";
 		return false;
 	}
 
@@ -6646,6 +6663,26 @@ bool RelionJob::getCommandsTomoAlignTiltSeriesJob(std::string &outputname, std::
 
         command += " --other_wrapper_args \" " + joboptions["other_aretomo_args"].getString() + " \"";
         command += " --gpu " + joboptions["gpu_ids"].getString() + ' ';
+
+	}
+	else if (joboptions["do_aretomo3"].getBoolean())
+	{
+		command += " --aretomo3 ";
+        command += " --aretomo3_exe " + joboptions["fn_aretomo3_exe"].getString();
+
+		if (joboptions["do_aretomo3_tiltcorrect"].getBoolean())
+		{
+			command += " --aretomo3_tiltcorrect ";
+            command += " --aretomo3_tiltcorrect_angle " + joboptions["aretomo3_tiltcorrect_angle"].getString();
+		}
+
+		if (joboptions["do_aretomo3_auto_alignz"].getBoolean())
+		{
+			command += " --aretomo3_auto_alignz ";
+		}
+
+        command += " --other_wrapper_args \" " + joboptions["other_aretomo3_args"].getString() + " \"";
+        command += " --gpu " + joboptions["gpu_ids_aretomo3"].getString() + ' ';
 
 	}
 

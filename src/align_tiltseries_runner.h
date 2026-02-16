@@ -27,6 +27,7 @@
 #include  <stdlib.h>
 #include  <unistd.h>
 #include  <stdio.h>
+#include  <limits.h>
 #include <src/metadata_table.h>
 #include <src/image.h>
 #include <src/time.h>
@@ -142,10 +143,10 @@ public:
     // Patch overlap (percentage 0-100)
     RFLOAT patch_overlap;
 
-    // Use AreTomo
+    // Use AreTomo2
     bool do_aretomo;
 
-    // Perform tilt angle correction in AreTomo
+    // Perform tilt angle correction in AreTomo2
     bool do_aretomo_tiltcorrect;
 
     // User-specified value for tilt angle correction
@@ -156,6 +157,21 @@ public:
 
     // Do phase shift estimation in AreTomo?
     bool do_aretomo_phaseshift;
+
+    // Use AreTomo3
+    bool do_aretomo3;
+
+    // AreTomo3 executable
+    FileName fn_aretomo3_exe;
+
+    // Perform tilt angle correction in AreTomo3
+    bool do_aretomo3_tiltcorrect;
+
+    // User-specified value for tilt angle correction in AreTomo3
+    RFLOAT aretomo3_tiltcorrect_angle;
+
+    // Let AreTomo3 estimate alignment thickness automatically
+    bool do_aretomo3_auto_alignz;
 
     // estimated tomogram thickness (for -AlignZ)
     RFLOAT tomogram_thickness;
@@ -196,8 +212,11 @@ public:
     // Execute IMOD for a single tomogram
     void executeIMOD(long idx_tomo, int rank = 0);
 
-    // Execute AreTomo for a single tomogram
+    // Execute AreTomo2 for a single tomogram
     void executeAreTomo(long idx_tomo, int rank = 0);
+
+    // Execute AreTomo3 for a single tomogram
+    void executeAreTomo3(long idx_tomo, int rank = 0);
 
     // Make per-tiltseries EPS files for the logfile
     void makePerTiltSeriesEPSFiles(long idx_tomo, bool do_ctf = false);
@@ -205,8 +224,11 @@ public:
     // Read IMOD results files and insert data into relion's MetaDataTable
     bool readIMODResults(long idx_tomo, std::string &error_message);
 
-    // Read AreTomo results files and insert data into relion's MetaDataTable
+    // Read AreTomo2 results files and insert data into relion's MetaDataTable
     bool readAreTomoResults(long idx_tomo, std::string &error_message);
+
+    // Read AreTomo3 results files and insert data into relion's MetaDataTable
+    bool readAreTomo3Results(long idx_tomo, std::string &error_message);
 
     // Harvest all AreTomo results into the single tomograms set starfile, and write it out
     void joinResults();

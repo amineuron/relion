@@ -64,6 +64,10 @@ void AlignTiltseriesRunnerMpi::run()
         {
             executeAreTomo(idx_tomograms[itomo], node->rank);
         }
+        else if (do_aretomo3)
+        {
+            executeAreTomo3(idx_tomograms[itomo], node->rank);
+        }
         else if (do_imod_fiducials || do_imod_patchtrack)
         {
             executeIMOD(idx_tomograms[itomo], node->rank);

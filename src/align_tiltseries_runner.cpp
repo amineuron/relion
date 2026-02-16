@@ -47,6 +47,14 @@ void AlignTiltseriesRunner::read(int argc, char **argv, int rank)
     aretomo_tilcorrect_angle = textToFloat(parser.getOption("--aretomo_tiltcorrect_angle", "User-specified tilt angle correction (value > 180, means estimate automatically", "999."));
     do_aretomo_ctf = parser.checkOption("--aretomo_ctf", "Perform CTF estimation in AreTomo? (default=false)");
     do_aretomo_phaseshift = parser.checkOption("--aretomo_phaseshift", "Perform CTF estimation in AreTomo? (default=false)");
+
+    int aretomo3_section = parser.addSection("AreTomo3 alignment options");
+    do_aretomo3 = parser.checkOption("--aretomo3", "OR: Use AreTomo3 alignment method");
+    fn_aretomo3_exe = parser.getOption("--aretomo3_exe", "AreTomo3 executable (can be set through $RELION_ARETOMO3_EXECUTABLE, defaults to AreTomo3)", "");
+    do_aretomo3_tiltcorrect = parser.checkOption("--aretomo3_tiltcorrect", "Specify to correct the tilt angle offset in AreTomo3 (AreTomo3 -TiltCor option; default=false)");
+    aretomo3_tiltcorrect_angle = textToFloat(parser.getOption("--aretomo3_tiltcorrect_angle", "User-specified tilt angle correction for AreTomo3 (value > 180, means estimate automatically", "999."));
+    do_aretomo3_auto_alignz = parser.checkOption("--aretomo3_auto_alignz", "Let AreTomo3 estimate alignment thickness automatically (default=false)");
+
     gpu_ids = parser.getOption("--gpu", "Device ids for each MPI-thread, e.g 0:1:2:3", "");
 
     int exp_section = parser.addSection("Expert options");
@@ -96,6 +104,20 @@ void AlignTiltseriesRunner::initialise(bool is_leader)
         }
     }
 
+    if (fn_aretomo3_exe == "")
+    {
+        char *penv;
+        penv = getenv("RELION_ARETOMO3_EXECUTABLE");
+        if (penv != NULL)
+        {
+            fn_aretomo3_exe = (std::string)penv;
+        }
+        else
+        {
+            fn_aretomo3_exe = "AreTomo3";
+        }
+    }
+
 
     if (fn_adoc_template != "")
     {
@@ -125,7 +147,8 @@ void AlignTiltseriesRunner::initialise(bool is_leader)
     if (do_imod_fiducials) i++;
     if (do_imod_patchtrack) i++;
     if (do_aretomo) i++;
-    if (i != 1) REPORT_ERROR("ERROR: you need to specify one of these options: --imod_fiducials or --imod_patchtrack or --aretomo");
+    if (do_aretomo3) i++;
+    if (i != 1) REPORT_ERROR("ERROR: you need to specify one of these options: --imod_fiducials or --imod_patchtrack or --aretomo2 or --aretomo3");
 
 	// Make sure fn_out ends with a slash
 	if (fn_out[fn_out.length()-1] != '/')
@@ -189,7 +212,7 @@ void AlignTiltseriesRunner::initialise(bool is_leader)
 		std::cout  << do_at_most << " tomograms as specified in --do_at_most." << std::endl;
 	}
 
-    if (do_aretomo)
+    if (do_aretomo || do_aretomo3)
     {
         if (gpu_ids.length() > 0)
             untangleDeviceIDs(gpu_ids, allThreadIDs);
@@ -200,7 +223,9 @@ void AlignTiltseriesRunner::initialise(bool is_leader)
     if (verb > 0)
 	{
         if (do_aretomo)
-            std::cout << " Using AreTomo executable in: " << fn_aretomo_exe << std::endl;
+            std::cout << " Using AreTomo2 executable in: " << fn_aretomo_exe << std::endl;
+        else if (do_aretomo3)
+            std::cout << " Using AreTomo3 executable in: " << fn_aretomo3_exe << std::endl;
         else
             std::cout << " Using batchruntomo executable in: " << fn_batchtomo_exe << std::endl;
 		std::cout << " to align tilt series for the following tomograms: " << std::endl;
@@ -233,6 +258,10 @@ void AlignTiltseriesRunner::run()
         if (do_aretomo)
         {
             executeAreTomo(idx_tomograms[itomo]);
+        }
+        else if (do_aretomo3)
+        {
+            executeAreTomo3(idx_tomograms[itomo]);
         }
         else if (do_imod_fiducials || do_imod_patchtrack)
         {
@@ -270,6 +299,12 @@ bool AlignTiltseriesRunner::checkResults(long idx_tomo)
             return exists(fn_aln);
         }
 
+    }
+    else if (do_aretomo3)
+    {
+        // AreTomo3 produces .aln file and _Imod/ directory with .xf and .tlt files
+        FileName fn_aln = fn_dir + tomoname + ".aln";
+        return exists(fn_aln);
     }
     else
     {
@@ -518,6 +553,180 @@ void AlignTiltseriesRunner::executeAreTomo(long idx_tomo, int rank)
     if (system(command.c_str()))
     {
         std::cerr << "WARNING: there was an error in executing: " << command << std::endl;
+    }
+
+}
+
+void AlignTiltseriesRunner::executeAreTomo3(long idx_tomo, int rank)
+{
+
+    // Generate external output directory and write input files for AreTomo3
+    std::string tomoname = tomogramSet.getTomogramName(idx_tomo);
+    FileName fn_dir = fn_out + "external/" + tomoname + '/';
+
+    // AreTomo3 needs to be run from the working directory with a basename-only -InPrefix
+    // (matching how WARP/WarpTools calls AreTomo3). Resolve absolute path for cd.
+    char cwd_buf[PATH_MAX];
+    if (getcwd(cwd_buf, sizeof(cwd_buf)) == NULL)
+        REPORT_ERROR("ERROR: cannot get current working directory");
+    std::string abs_fn_dir;
+    if (fn_dir[0] == '/')
+        abs_fn_dir = fn_dir;
+    else
+        abs_fn_dir = std::string(cwd_buf) + "/" + fn_dir;
+
+    mktree(fn_dir);
+
+    FileName fn_series = fn_dir + tomoname + ".mrc";
+    FileName fn_tilt = fn_dir + tomoname + ".rawtlt";
+    FileName fn_log = fn_dir + tomoname + ".log";
+    FileName fn_com = fn_dir + tomoname + ".com";
+
+    // Sort by tilt angle so the stack is written in tilt-angle order
+    // (AreTomo3 with Cmd 1 expects a sorted tilt series stack)
+    tomogramSet.tomogramTables[idx_tomo].newSort(EMDL_TOMO_NOMINAL_TILT_STAGE_ANGLE);
+
+    // Generate MRC stack with pixel size in header (is_aretomo=true sets sampling rate)
+    generateMRCStackAndRawTiltFile(idx_tomo, true);
+
+    // AreTomo3 expects single-column rawtlt file (tilt angles only, no dose order).
+    // Overwrite the 2-column file that generateMRCStackAndRawTiltFile created.
+    // AreTomo3 does NOT have -AngFile; it auto-discovers {prefix}.rawtlt alongside the stack.
+    {
+        std::ofstream fh_tilt;
+        fh_tilt.open((fn_tilt).c_str(), std::ios::out);
+        int fc = tomogramSet.tomogramTables[idx_tomo].numberOfObjects();
+        for (int f = 0; f < fc; f++)
+        {
+            RFLOAT tiltangle;
+            tomogramSet.tomogramTables[idx_tomo].getValue(EMDL_TOMO_NOMINAL_TILT_STAGE_ANGLE, tiltangle, f);
+            fh_tilt << tiltangle << std::endl;
+        }
+        fh_tilt.close();
+    }
+
+    RFLOAT pixel_size = tomogramSet.getTiltSeriesPixelSize(idx_tomo);
+    // Tomogram_thickness is in nm, convert to unbinned pixels for -AlignZ
+    RFLOAT mythickness = tomogram_thickness;
+    if (tomogramSet.globalTable.containsLabel(EMDL_TOMO_TOMOGRAM_THICKNESS))
+        tomogramSet.globalTable.getValueSafely(EMDL_TOMO_TOMOGRAM_THICKNESS, mythickness, idx_tomo);
+    RFLOAT thickness_pix = mythickness * 10. / pixel_size;
+
+    // Build AreTomo3 command
+    // cd to working directory, then run with basename-only InPrefix
+    std::string command = "cd " + abs_fn_dir + " && " + fn_aretomo3_exe;
+
+    // Input: -InPrefix/-InSuffix replaces AreTomo2's -InMrc/-AngFile
+    command += " -InPrefix " + tomoname;
+    command += " -InSuffix .mrc";
+    command += " -OutDir " + abs_fn_dir;
+    // Explicit pixel size (also in MRC header, but AreTomo3 accepts it)
+    command += " -PixSize " + floatToString(pixel_size);
+
+    // -Cmd 1: start from tilt series alignment (skip motion correction)
+    // This is correct because RELION already did motion correction
+    command += " -Cmd 1";
+    // -Serial 1: process one tilt series at a time
+    command += " -Serial 1";
+    // -SplitSum 0: disable odd/even frame splitting (we have single-frame tilt images)
+    command += " -SplitSum 0";
+
+    // Alignment thickness: either let AreTomo3 auto-estimate, or pass from RELION
+    if (do_aretomo3_auto_alignz)
+    {
+        command += " -AlignZ 0";
+    }
+    else
+    {
+        command += " -AlignZ " + floatToString(thickness_pix);
+    }
+    // Skip reconstruction (same as AreTomo2's -volZ 0)
+    command += " -VolZ 0";
+
+    // -CorrCTF 0: disable CTF estimation and correction
+    // (RELION already did CTF estimation in a separate job)
+    command += " -CorrCTF 0";
+    // -DarkTol 0: keep all tilts, do not remove any dark images
+    command += " -DarkTol 0";
+
+    // -OutImod 3: generate IMOD files + aligned tilt series for Relion4/WARP
+    command += " -OutImod 3";
+
+    // Tilt axis angle from the input star file
+    if (tomogramSet.tomogramTables[idx_tomo].containsLabel(EMDL_TOMO_NOMINAL_TILT_AXIS_ANGLE))
+    {
+        RFLOAT tiltaxis_angle = tomogramSet.tomogramTables[idx_tomo].getDouble(EMDL_TOMO_NOMINAL_TILT_AXIS_ANGLE, 0);
+        command += " -TiltAxis " + floatToString(tiltaxis_angle);
+    }
+
+    // Tilt angle correction (same options as AreTomo2)
+    if (do_aretomo3_tiltcorrect)
+    {
+        command += " -TiltCor 1 ";
+        if (aretomo3_tiltcorrect_angle < 180.)
+            command += floatToString(aretomo3_tiltcorrect_angle);
+    }
+    else
+    {
+        command += " -TiltCor -1 ";
+    }
+
+    // GPU selection
+    if (gpu_ids.length() > 0)
+    {
+        if (rank >= allThreadIDs.size())
+            REPORT_ERROR("ERROR: not enough MPI nodes specified for the GPU IDs.");
+
+        command += " -Gpu " ;
+        for (int igpu = 0; igpu < allThreadIDs[rank].size(); igpu++)
+        {
+            command += allThreadIDs[rank][igpu] + " ";
+        }
+    }
+
+    // Any additional user-specified arguments
+    if (other_wrapper_args.length() > 0)
+        command += " " + other_wrapper_args;
+
+    // Redirect stdout/stderr to log file (absolute path since we cd'd)
+    std::string abs_fn_log;
+    if (fn_log[0] == '/')
+        abs_fn_log = fn_log;
+    else
+        abs_fn_log = std::string(cwd_buf) + "/" + fn_log;
+    command += " > " + abs_fn_log + " 2>&1 ";
+
+    // Write the command to a .com file for reference
+    std::ofstream  fhc;
+    fhc.open((fn_com).c_str(), std::ios::out);
+    fhc << command << std::endl;
+    fhc.close();
+
+    if (system(command.c_str()))
+    {
+        std::cerr << "WARNING: there was an error in executing: " << command << std::endl;
+    }
+
+    // Create a symlink for the aligned stack in the parent directory,
+    // matching the AreTomo2 naming convention (tomoname_aligned.mrc).
+    // AreTomo3 with -OutImod 3 writes the aligned stack to _Imod/tomoname_st.mrc
+    FileName fn_imod_aligned = fn_dir + tomoname + "_Imod/" + tomoname + "_st.mrc";
+    FileName fn_aligned = fn_dir + tomoname + "_aligned.mrc";
+    if (exists(fn_imod_aligned) && !exists(fn_aligned))
+    {
+        std::string abs_imod_aligned, abs_aligned;
+        if (fn_imod_aligned[0] == '/')
+        {
+            abs_imod_aligned = fn_imod_aligned;
+            abs_aligned = fn_aligned;
+        }
+        else
+        {
+            abs_imod_aligned = std::string(cwd_buf) + "/" + fn_imod_aligned;
+            abs_aligned = std::string(cwd_buf) + "/" + fn_aligned;
+        }
+        std::string ln_cmd = "ln -sf " + abs_imod_aligned + " " + abs_aligned;
+        system(ln_cmd.c_str());
     }
 
 }
@@ -882,6 +1091,159 @@ bool AlignTiltseriesRunner::readAreTomoResults(long idx_tomo, std::string &error
 
 }
 
+bool AlignTiltseriesRunner::readAreTomo3Results(long idx_tomo, std::string &error_message)
+{
+
+    std::string tomoname = tomogramSet.getTomogramName(idx_tomo);
+    FileName fn_dir = fn_out + "external/" + tomoname + '/';
+    FileName fn_aln = fn_dir + tomoname + ".aln";
+    FileName fn_log = fn_dir + tomoname + ".log";
+
+    // The table must be sorted by tilt angle to match the stack order used in executeAreTomo3.
+    // In MPI mode, the table may not have been sorted yet when joinResults() calls this function.
+    tomogramSet.tomogramTables[idx_tomo].newSort(EMDL_TOMO_NOMINAL_TILT_STAGE_ANGLE);
+
+    int fc = tomogramSet.tomogramTables[idx_tomo].numberOfObjects();
+    RFLOAT angpix = tomogramSet.getTiltSeriesPixelSize(idx_tomo);
+
+    std::string line;
+    std::vector<std::string> words;
+
+    // 0. Try to get the best tilt axis score from the redirected log file
+    //    AreTomo3 may or may not print "Best tilt axis:" to stdout
+    RFLOAT tiltaxis_score = -0.999;
+    if (exists(fn_log))
+    {
+        std::ifstream in0(fn_log.data(), std::ios_base::in);
+        if (!in0.fail())
+        {
+            in0.seekg(0);
+            while (getline(in0, line, '\n'))
+            {
+                if (line.find("Best tilt axis:") != std::string::npos)
+                {
+                    tokenize(line, words);
+                    if (words.size() >= 6)
+                    {
+                        if (textToFloat(words[5]) > tiltaxis_score)
+                            tiltaxis_score = textToFloat(words[5]);
+                    }
+                }
+            }
+            in0.close();
+        }
+    }
+
+    // Set the best score in the global table
+    tomogramSet.globalTable.setValue(EMDL_TOMO_ARETOMO_TILTAXIS_SCORE, tiltaxis_score, idx_tomo);
+
+    // 1. Get tiltseries alignment parameters from the .aln file (also parses AlphaOffset)
+    //    AreTomo3's .aln format has the same global alignment section as AreTomo2:
+    //    SEC ROT GMAG TX TY SMEAN SFIT SCALE BASE TILT
+    //    It also has header fields: AlphaOffset (tilt angle offset), BetaOffset, Thickness
+    //    and a Local Alignment section, which we skip.
+    std::ifstream in(fn_aln.data(), std::ios_base::in);
+    if (in.fail())
+    {
+        error_message = " ERROR: cannot open AreTomo3 alignment file: " + fn_aln;
+        return false;
+    }
+
+    std::vector<RFLOAT> rot, tilt, tx, ty;
+    std::vector<int> indices, dark_frames;
+    bool in_local_alignment = false;
+    RFLOAT alpha_offset = 0.;
+
+    in.seekg(0);
+    while (getline(in, line, '\n'))
+    {
+        // Stop reading if we reach the Local Alignment section
+        if (line.find("# Local Alignment") != std::string::npos)
+        {
+            in_local_alignment = true;
+            continue;
+        }
+
+        if (in_local_alignment) continue;
+
+        // Parse the AlphaOffset (tilt angle offset) from the header
+        // Format: "# AlphaOffset = <value>"
+        if (line.find("# AlphaOffset =") != std::string::npos)
+        {
+            tokenize(line, words);
+            if (words.size() >= 4)
+                alpha_offset = textToFloat(words[3]);
+        }
+
+        // See if any dark frames were excluded by AreTomo3
+        // Format: "# DarkFrame = <dark_idx> <SEC_1based> <tilt_angle>"
+        // We only use the count for validation; with -DarkTol 0 there should be none
+        if (line.find("# DarkFrame =") == 0)
+        {
+            tokenize(line, words);
+            if (words.size() >= 5)
+            {
+                int idx = textToInteger(words[4]); // 1-based SEC
+                dark_frames.push_back(idx);
+            }
+        }
+
+        // Data lines are all lines without a leading #
+        if (line.find("#") != 0 && line.length() > 0)
+        {
+            tokenize(line, words);
+            if (words.size() < 10) continue;
+            // AreTomo3 uses 1-based SEC indices, convert to 0-based
+            int idx = textToInteger(words[0]) - 1;
+            if (idx < 0 || idx >= fc) REPORT_ERROR("BUG: idx= " + integerToString(idx) + " fc= " + integerToString(fc) + " from .aln file: " + fn_aln);
+            indices.push_back(idx);
+            rot.push_back(textToFloat(words[1]));
+            tx.push_back(angpix * textToFloat(words[3]));
+            ty.push_back(angpix * textToFloat(words[4]));
+            tilt.push_back(textToFloat(words[9]));
+        }
+    }
+    in.close();
+
+    if (rot.size() != fc - dark_frames.size())
+    {
+        error_message = " ERROR: unexpected number of data rows in AreTomo3 parameter file: " + fn_aln + " : " +
+                integerToString(rot.size()) + " (expected: " + integerToString(fc) + " - " + integerToString(dark_frames.size()) + " dark frames )";
+        return false;
+    }
+
+    MetaDataTable MDnew;
+    for (int i = 0; i < rot.size(); i++)
+    {
+        int f = indices[i];
+
+        MDnew.addObject(tomogramSet.tomogramTables[idx_tomo].getObject(f));
+
+        MDnew.setValue(EMDL_TOMO_XTILT, 0.);
+        MDnew.setValue(EMDL_TOMO_YTILT, tilt[i]);
+        MDnew.setValue(EMDL_TOMO_ZROT, rot[i]);
+        if (i==0) tomogramSet.globalTable.setValue(EMDL_TOMO_ZROT, rot[i], idx_tomo);
+        MDnew.setValue(EMDL_TOMO_XSHIFT_ANGST, tx[i]);
+        MDnew.setValue(EMDL_TOMO_YSHIFT_ANGST, ty[i]);
+    }
+
+    MDnew.sort(EMDL_TOMO_NOMINAL_TILT_STAGE_ANGLE);
+    MDnew.setName(tomogramSet.tomogramTables[idx_tomo].getName());
+    tomogramSet.tomogramTables[idx_tomo] = MDnew;
+
+    // Store the tilt angle offset from the .aln header (AlphaOffset)
+    if (do_aretomo3_tiltcorrect && aretomo3_tiltcorrect_angle > 180.)
+    {
+        tomogramSet.globalTable.setValue(EMDL_TOMO_ARETOMO_TILTANGLE_OFFSET, alpha_offset, idx_tomo);
+    }
+
+    // Also make per-tiltseries EPS files
+    makePerTiltSeriesEPSFiles(idx_tomo);
+
+    return true;
+
+}
+
 void AlignTiltseriesRunner::joinResults()
 {
     // Check again the STAR file exists and has the right labels
@@ -901,7 +1263,7 @@ void AlignTiltseriesRunner::joinResults()
             if (!readAreTomoResults(itomo, error_message))
             {
                 std::string myname = tomogramSet.getTomogramName(itomo);
-                std::cerr << " Error for reading AreTomo results from tomogram: " << myname << ":" << std::endl;
+                std::cerr << " Error for reading AreTomo2 results from tomogram: " << myname << ":" << std::endl;
                 std::cerr << error_message << std::endl;
                 failed_tomograms.push_back(myname);
             }
@@ -914,6 +1276,16 @@ void AlignTiltseriesRunner::joinResults()
                         MDpower.addObject(tomogramSet.tomogramTables[itomo].getObject(current_object));
                     }
                 }
+            }
+        }
+        else if (do_aretomo3)
+        {
+            if (!readAreTomo3Results(itomo, error_message))
+            {
+                std::string myname = tomogramSet.getTomogramName(itomo);
+                std::cerr << " Error for reading AreTomo3 results from tomogram: " << myname << ":" << std::endl;
+                std::cerr << error_message << std::endl;
+                failed_tomograms.push_back(myname);
             }
         }
         else if (do_imod_fiducials || do_imod_patchtrack)
@@ -980,6 +1352,13 @@ void AlignTiltseriesRunner::joinResults()
         plot_labels.push_back(EMDL_TOMO_ZROT);
         plot_labels.push_back(EMDL_TOMO_ARETOMO_TILTAXIS_SCORE);
         if (do_aretomo_tiltcorrect && aretomo_tilcorrect_angle > 180.)
+            plot_labels.push_back(EMDL_TOMO_ARETOMO_TILTANGLE_OFFSET);
+    }
+    else if (do_aretomo3)
+    {
+        plot_labels.push_back(EMDL_TOMO_ZROT);
+        plot_labels.push_back(EMDL_TOMO_ARETOMO_TILTAXIS_SCORE);
+        if (do_aretomo3_tiltcorrect && aretomo3_tiltcorrect_angle > 180.)
             plot_labels.push_back(EMDL_TOMO_ARETOMO_TILTANGLE_OFFSET);
     }
     FileName fn_eps;

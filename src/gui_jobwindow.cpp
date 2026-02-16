@@ -2612,7 +2612,7 @@ void JobWindow::initialiseTomoImportWindow()
 
 void JobWindow::initialiseTomoAlignTiltseriesWindow()
 {
-    setupTabs(3);
+    setupTabs(4);
 
     tab1->begin();
     tab1->label("I/O");
@@ -2630,6 +2630,7 @@ void JobWindow::initialiseTomoAlignTiltseriesWindow()
 
     place("fn_batchtomo_exe", TOGGLE_DEACTIVATE);
     place("fn_aretomo_exe", TOGGLE_DEACTIVATE);
+    place("fn_aretomo3_exe", TOGGLE_DEACTIVATE);
 
     tab1->end();
     tab2->begin();
@@ -2702,12 +2703,44 @@ void JobWindow::initialiseTomoAlignTiltseriesWindow()
 
     tab3->end();
 
+    tab4->begin();
+    tab4->label("AreTomo3");
+    resetHeight();
+
+    group6 = new Fl_Group(WCOL0,  MENUHEIGHT, 550, 600-MENUHEIGHT, "");
+    group6->end();
+    place("do_aretomo3", TOGGLE_DEACTIVATE, group6, false);
+    group6->begin();
+
+    // Add a little spacer
+    current_y += STEPY/2;
+    group7 = new Fl_Group(WCOL0,  MENUHEIGHT, 550, 600-MENUHEIGHT, "");
+    group7->end();
+    place("do_aretomo3_tiltcorrect", TOGGLE_DEACTIVATE, group7, false);
+    group7->begin();
+    place("aretomo3_tiltcorrect_angle", TOGGLE_DEACTIVATE);
+    group7->end();
+    guientries["do_aretomo3_tiltcorrect"].cb_menu_i(); // make default active
+
+    // Add a little spacer
+    current_y += STEPY/2;
+    place("do_aretomo3_auto_alignz", TOGGLE_DEACTIVATE);
+
+    // Add a little spacer
+    current_y += STEPY/2;
+    place("other_aretomo3_args", TOGGLE_DEACTIVATE);
+    place("gpu_ids_aretomo3");
+    group6->end();
+    guientries["do_aretomo3"].cb_menu_i(); // make default active
+
+    tab4->end();
+
 
 }
 
 void JobWindow::initialiseTomoReconstructTomogramsWindow()
 {
-    setupTabs(2);
+    setupTabs(3);
 
 	tab1->begin();
 	tab1->label("I/O");
