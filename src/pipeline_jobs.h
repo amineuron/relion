@@ -151,7 +151,8 @@ static const std::vector<std::string> job_tomo_pick_mode{
 "particles",
 "spheres",
 "surfaces",
-"filaments"
+"filaments",
+"contacts"
 };
 
 static const std::vector<std::string> job_modelangelo_alphabet_options{
@@ -286,6 +287,7 @@ static bool do_allow_change_minimum_dedicated;
 #define LABEL_TOMOPICK_PARTS_SPHERE    "ParticleGroupMetadata.star.relion.tomo.manualpick.spheres"
 #define LABEL_TOMOPICK_PARTS_FILAMENT  "ParticleGroupMetadata.star.relion.tomo.manualpick.filaments"
 #define LABEL_TOMOPICK_PARTS_SURFACE   "ParticleGroupMetadata.star.relion.tomo.manualpick.surfaces"
+#define LABEL_TOMOPICK_PARTS_CONTACTS  "ParticleGroupMetadata.star.relion.tomo.manualpick.contacts"
 #define LABEL_TOMOPICK_OPTSET          "TomoOptimisationSet.star.relion.tomo.manualpick"
 #define LABEL_EXCLUDE_TOMOGRAMS        "TomogramGroupMetadata.star.relion.tomo.excludeimages"
 #define LABEL_SUBTOMO_PARTS            "ParticleGroupMetadata.star.relion.tomo.extract"

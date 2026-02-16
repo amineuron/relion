@@ -6994,10 +6994,10 @@ void RelionJob::initialiseTomoPickTomogramsJob()
 	joboptions["in_tomoset"] = JobOption("Input tomograms.star:", LABEL_TOMOGRAMS_CPIPE, 1, "", "STAR files (*.star)",  "Input tomograms star file that contains the reconstructed tomograms in which to pick particles. ");
 	//joboptions["cache_size"] = JobOption("Number of cached tomograms:", 5, 1, 10, 1, "This controls the number of cached tomograms in Napari.");
 
-	joboptions["pick_mode"] = JobOption("Picking mode:", job_tomo_pick_mode, 1, "Type of picking mode to use: particles, spheres or (todo:) cylinders.");
+	joboptions["pick_mode"] = JobOption("Picking mode:", job_tomo_pick_mode, 1, "Type of picking mode to use: particles, spheres, filaments, or contacts. Contacts mode picks one particle per pair of points, using the first point as position and the direction to the second point as orientation.");
 
 	// for filaments, cylinders and spheres
-	joboptions["particle_spacing"] = JobOption("Particle spacing (A):",-1,10,250,10, "Spacing (in Angstroms) between particles sampled on a sphere, on surfaces, or in filaments. This option will be ignored if you are picking individual particles");
+	joboptions["particle_spacing"] = JobOption("Particle spacing (A):",-1,10,250,10, "Spacing (in Angstroms) between particles sampled on a sphere, on surfaces, or in filaments. This option will be ignored if you are picking individual particles or contacts.");
 
     joboptions["in_star_file"] = JobOption("Input particles.star (optional):", LABEL_PARTS_CPIPE, 1, "", "Particle STAR file (*.star)", "\
 If Picking mode='particles', this star file is used to generate initial particle annotations on the input tomograms.\n\n\
@@ -7065,7 +7065,7 @@ bool RelionJob::getCommandsTomoPickTomogramsJob(std::string &outputname, std::ve
 	command2 += " --output-directory " + outputname;
 
 	FileName fnt = joboptions["pick_mode"].getString();
-	if (!fnt.contains("particles"))
+	if (!fnt.contains("particles") && !fnt.contains("contacts"))
 		command2 += " --spacing-angstroms " + joboptions["particle_spacing"].getString();
 
 	// Other arguments for get-poses
@@ -7076,6 +7076,7 @@ bool RelionJob::getCommandsTomoPickTomogramsJob(std::string &outputname, std::ve
     if (fnt.contains("filaments")) mytype = LABEL_TOMOPICK_PARTS_FILAMENT;
     else if (fnt.contains("spheres")) mytype = LABEL_TOMOPICK_PARTS_SPHERE;
     else if (fnt.contains("surface")) mytype = LABEL_TOMOPICK_PARTS_SURFACE;
+    else if (fnt.contains("contacts")) mytype = LABEL_TOMOPICK_PARTS_CONTACTS;
     Node node2(outputname+"particles.star", mytype);
 	outputNodes.push_back(node2);
 	Node node3(outputname+"optimisation_set.star", LABEL_TOMOPICK_OPTSET);
